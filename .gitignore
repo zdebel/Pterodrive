@@ -1,0 +1,30 @@
+# Assets extracted from original DOS executable (copyright compliance)
+assets/
+UGH.EXE
+*.EXE
+*.exe
+UGH!.HI
+*.HI
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+dist/
+*.spec
+*.egg-info/
+
+# Development artifacts and telemetry
+*.csv
+*.raw
+*.pal
+record_*.json
+renders/
+.coverage
+.pytest_cache/

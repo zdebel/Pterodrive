@@ -1,0 +1,5 @@
+# Runtime dependencies for the UGH! Python port.
+# The OPL2 emulation, AdLib driver and asset extraction are Python + numpy.
+numpy>=1.26                # vectorised OPL2 rendering (audio extraction)
+pygame-ce>=2.5.2          # drop-in pygame fork with prebuilt wheels for Python 3.10-3.14
+pytest>=7.0.0

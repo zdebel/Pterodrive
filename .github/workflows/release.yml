@@ -1,0 +1,114 @@
+# Builds standalone Pterodrive executables for Windows, Linux and macOS.
+#
+#   git tag v0.1.0 && git push origin v0.1.0   -> build + GitHub Release
+#   Actions tab -> "Release" -> Run workflow   -> build only (artifacts)
+#
+# The tag must match __version__ in version.py.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+            exe: Pterodrive.exe
+          - os: ubuntu-22.04          # oldest glibc we build against = widest Linux support
+            platform: linux-x64
+            exe: Pterodrive
+          - os: macos-latest        # Apple Silicon
+            platform: macos-arm64
+            exe: Pterodrive
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(python -c "from version import __version__; print(__version__)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version.py ($version)"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: pygame-ce numpy 'pyinstaller>=6.10'
+
+      - name: Build native audio core
+        run: python -m extractor.build_native      # ~10x faster first-start audio extraction
+
+      - name: Build executable
+        run: |
+          lib=$(python -c "from extractor.build_native import lib_name; print(lib_name())")
+          sep=$(python -c "import os; print(os.pathsep)")
+          pyinstaller --noconfirm --clean --onefile --console --name Pterodrive \
+            --add-binary "extractor/$lib${sep}extractor" main.py
+
+      - name: Smoke test
+        run: |
+          out=$("dist/${{ matrix.exe }}" --version)
+          echo "$out"
+          [[ "$out" == "Pterodrive ${{ steps.version.outputs.version }}" ]]
+
+      - name: Package
+        id: package
+        run: |
+          name="Pterodrive-${{ steps.version.outputs.version }}-${{ matrix.platform }}"
+          mkdir "$name"
+          cp "dist/${{ matrix.exe }}" README.md LICENSE "$name/"
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            tar -czf "$name.tar.gz" "$name"
+            echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+            echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            zip -qry "$name.zip" "$name"
+            echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: ${{ steps.package.outputs.file }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Pterodrive ${GITHUB_REF_NAME#v}" \
+            --generate-notes
